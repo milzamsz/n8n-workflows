@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0",
+  "environment": "staging",
+  "instance_id": "ocloud-staging",
+  "company_id": 1,
+  "profile_id": "draft-operations",
+  "timezone": "Asia/Jakarta",
+  "workflows": {
+    "linkedin_to_crm": {
+      "event_type": "linkedin.crm_lead_candidate.v1",
+      "owner": "CRM Operations",
+      "reviewer_role": "crm_manager",
+      "source_allowlist_ref": "secret://n8n/linkedin/source-allowlist",
+      "production_approved": false
+    },
+    "gmail_vendor_invoice": {
+      "event_type": "gmail.vendor_invoice_received.v1",
+      "owner": "Accounts Payable Operations",
+      "reviewer_role": "accounts_payable_manager",
+      "source_allowlist_ref": "secret://n8n/gmail/vendor-invoice-filter",
+      "production_approved": false
+    },
+    "bank_statement_intake": {
+      "event_type": "bank.statement_received.v1",
+      "owner": "Treasury Operations",
+      "reviewer_role": "accounting_manager",
+      "source_allowlist_ref": "secret://n8n/bank/account-map",
+      "staging_journal_id": 6,
+      "production_approved": false
+    },
+    "scheduled_business_briefs": {
+      "event_type": "business.brief_scheduled.v1",
+      "owner": "Business Intelligence Operations",
+      "reviewer_role": "finance_controller",
+      "source_allowlist_ref": "config://n8n/brief-destination-allowlist",
+      "production_approved": false
+    },
+    "indonesian_tax_working_papers": {
+      "event_type": "id.tax_working_paper_requested.v1",
+      "owner": "Tax Operations",
+      "reviewer_role": "tax_manager",
+      "source_allowlist_ref": "secret://n8n/tax/requester-allowlist",
+      "production_approved": false
+    }
+  }
+}

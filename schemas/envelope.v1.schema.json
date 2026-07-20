@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ocloud.example/schemas/phase8/envelope.v1.schema.json",
+  "title": "Phase 8 workflow envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id", "event_type", "occurred_at", "correlation_id", "actor",
+    "context", "artifact_ref", "content_hash", "idempotency_key"
+  ],
+  "properties": {
+    "event_id": { "type": "string", "format": "uuid" },
+    "event_type": { "type": "string", "pattern": "^[a-z0-9_.]+\\.v1$" },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "correlation_id": { "type": "string", "format": "uuid" },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "const": "service" },
+        "id": { "type": "string", "minLength": 3, "maxLength": 100 }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instance_id", "company_id", "profile_id"],
+      "properties": {
+        "instance_id": { "const": "ocloud-staging" },
+        "company_id": { "const": 1 },
+        "profile_id": { "enum": ["draft-operations", "reporting"] }
+      }
+    },
+    "artifact_ref": { "type": "string", "minLength": 3, "maxLength": 512 },
+    "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "idempotency_key": { "type": "string", "pattern": "^[a-z-]+:v1:[0-9a-f]{64}$" }
+  }
+}

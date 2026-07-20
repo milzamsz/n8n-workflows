@@ -1,0 +1,2355 @@
+{
+  "name": "Phase 8 - Indonesian Tax Working Papers v1",
+  "nodes": [
+    {
+      "id": "4e1685b4-ad67-464b-972c-ff1c276f921e",
+      "name": "Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "phase8/indonesian-tax-working-papers/v1",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "b691c763-5a29-4d76-af0e-f43b954d09bb",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-webhook-header",
+          "name": "phase8-webhook-header"
+        }
+      }
+    },
+    {
+      "id": "bbe6bc6c-26c5-4b1e-b834-45970fba0c86",
+      "name": "Validate Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst crypto=require('crypto'); const sha=v=>crypto.createHash('sha256').update(v).digest('hex'); const must=(ok,code)=>{if(!ok)throw new Error('permanent:'+code)};\nlet body=$input.first().json.body ?? $input.first().json;let reason_code=null;try{must(/^\\d{4}-(0[1-9]|1[0-2])$/.test(body.request?.tax_period||''),'tax_period');must(typeof body.request?.rule_version==='string'&&body.request.rule_version.length>=3,'rule_version');must(typeof body.request?.rule_source_ref==='string'&&body.request.rule_source_ref.length>=3,'rule_source_ref');must(Array.isArray(body.request?.transaction_refs)&&body.request.transaction_refs.length>=1,'transaction_refs');must(Array.isArray(body.request?.document_refs),'document_refs');must(body&&typeof body==='object'&&!Array.isArray(body),'body');must(typeof body.artifact_ref==='string'&&body.artifact_ref.length>=3&&body.artifact_ref.length<=512,'artifact_ref');must(/^sha256:[0-9a-f]{64}$/.test(body.content_hash||''),'content_hash');}catch(error){reason_code=String(error.message||error).replace(/^permanent:/,'').slice(0,100);}\nconst raw=JSON.stringify(body??{});const valid=reason_code===null;const content_hash=/^sha256:[0-9a-f]{64}$/.test(body?.content_hash||'')?body.content_hash:'sha256:'+sha(raw);const artifact_ref=typeof body?.artifact_ref==='string'&&body.artifact_ref.length>=3&&body.artifact_ref.length<=512?body.artifact_ref:'rejected://n8n-id-tax-working-paper/'+sha(raw).slice(0,32);\nconst correlation_id=crypto.randomUUID(); const idempotency_key='indonesian-tax-working-papers:v1:'+sha('id.tax_working_paper_requested.v1|ocloud-staging|1|'+artifact_ref+'|'+content_hash);\nreturn [{json:{valid,reason_code,event:body,event_type:'id.tax_working_paper_requested.v1',schema_version:'1.0',correlation_id,idempotency_key,content_hash,artifact_ref,owner:'Tax Operations',actor:'n8n-id-tax-working-paper',context:{instance_id:'ocloud-staging',company_id:1,profile_id:'reporting'}}}];"
+      }
+    },
+    {
+      "id": "bb76cab0-7596-4a65-ab31-5ba085642e25",
+      "name": "Claim Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH claimed AS (INSERT INTO phase8.events(idempotency_key,workflow,schema_version,correlation_id,content_hash,artifact_ref,status,owner) VALUES ($1,$2,$3,$4,$5,$6,CASE WHEN $8 THEN 'received' ELSE 'exception' END,$7) ON CONFLICT DO NOTHING RETURNING 1) SELECT EXISTS(SELECT 1 FROM claimed) AS claimed",
+        "options": {
+          "queryReplacement": "={{ [$json.idempotency_key, $json.event_type, $json.schema_version, $json.correlation_id, $json.content_hash, $json.artifact_ref, $json.owner, $json.valid] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "phase8-state-postgres",
+          "name": "phase8-state-postgres"
+        }
+      }
+    },
+    {
+      "id": "553f07a4-b17a-43e4-a7ad-c2db17aa520d",
+      "name": "Is New",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c74215b8-1ab5-474d-aea9-6c5a08e3234e",
+              "leftValue": "={{ $json.claimed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ec970bd7-538f-490a-8c0f-91c3a0cc5c4c",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        960,
+        -80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "4b055d90-e1a8-43c1-b037-475bc54d8396",
+              "leftValue": "={{ $(\"Validate Event\").first().json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c4093dba-4ff7-4c46-bec7-3356f90b047e",
+      "name": "Prepare Odoo Reads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        -160
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const request=$('Validate Event').first().json.event.request;const [year,month]=request.tax_period.split('-').map(Number);const start=request.tax_period+'-01';const endMonth=month===12?1:month+1;const endYear=month===12?year+1:year;const end=String(endYear).padStart(4,'0')+'-'+String(endMonth).padStart(2,'0')+'-01';const context={allowed_company_ids:[1],force_company:1};return [{json:{instance:'ocloud-staging',model:'account.move',domain:[['company_id','=',1],['state','=','posted'],['date','>=',start],['date','<',end]],fields:['id','date','move_type','amount_untaxed','amount_tax','currency_id','partner_id','ref'],limit:100,context}}];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "ba85fe57-60bc-4feb-8846-ae0b29c4c576",
+      "name": "Read Odoo",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        2640,
+        -160
+      ],
+      "parameters": {
+        "serverTransport": "httpStreamable",
+        "endpointUrl": "={{ $env.ODOO_MCP_STAGING_URL }}",
+        "authentication": "bearerAuth",
+        "tool": {
+          "mode": "id",
+          "value": "odoo_search_read"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "convertToBinary": false
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "odoo-mcp-staging-bearer",
+          "name": "odoo-mcp-staging-bearer"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "2f291ff5-3efd-415e-bbc8-1bfed5d977f5",
+      "name": "Read Odoo Attempt 2",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        2880,
+        -160
+      ],
+      "parameters": {
+        "serverTransport": "httpStreamable",
+        "endpointUrl": "={{ $env.ODOO_MCP_STAGING_URL }}",
+        "authentication": "bearerAuth",
+        "tool": {
+          "mode": "id",
+          "value": "odoo_search_read"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "convertToBinary": false
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "odoo-mcp-staging-bearer",
+          "name": "odoo-mcp-staging-bearer"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "613f2e89-5f6d-459c-b9c4-b1557d6099bf",
+      "name": "Read Odoo Attempt 3",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        3120,
+        -160
+      ],
+      "parameters": {
+        "serverTransport": "httpStreamable",
+        "endpointUrl": "={{ $env.ODOO_MCP_STAGING_URL }}",
+        "authentication": "bearerAuth",
+        "tool": {
+          "mode": "id",
+          "value": "odoo_search_read"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "convertToBinary": false
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "odoo-mcp-staging-bearer",
+          "name": "odoo-mcp-staging-bearer"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "d7f3d71a-9907-437c-b90c-532bff83a66a",
+      "name": "Read Odoo Attempt 4",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        3360,
+        -160
+      ],
+      "parameters": {
+        "serverTransport": "httpStreamable",
+        "endpointUrl": "={{ $env.ODOO_MCP_STAGING_URL }}",
+        "authentication": "bearerAuth",
+        "tool": {
+          "mode": "id",
+          "value": "odoo_search_read"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "convertToBinary": false
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "odoo-mcp-staging-bearer",
+          "name": "odoo-mcp-staging-bearer"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c0a5afff-baca-458a-8a3c-8e65cc8129a1",
+      "name": "Read Odoo Classify Error 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2700,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "e0985acd-e923-45ce-bce2-df6798be8047",
+      "name": "Read Odoo Retryable 1?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2730,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "e0985acd-e923-45ce-bce2-df6798be8047",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dbd7cecb-0bab-4319-8477-760c0f40409d",
+      "name": "Read Odoo Backoff 2s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2760,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "5b492237-e8d7-42bd-8e0e-7d09cfd0d7b8",
+      "name": "Read Odoo Classify Error 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2940,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "99e738f3-e069-4a8d-80a0-8a4e5b7f0401",
+      "name": "Read Odoo Retryable 2?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2970,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "99e738f3-e069-4a8d-80a0-8a4e5b7f0401",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "4fd2079d-c422-49d7-bdab-4cd457b9413c",
+      "name": "Read Odoo Backoff 10s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3000,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 10,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "0deacea2-8d57-49dc-b268-0369cfbb0af1",
+      "name": "Read Odoo Classify Error 3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3180,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "820575e8-24a5-4f6e-94c0-70b353bb05ed",
+      "name": "Read Odoo Retryable 3?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3210,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "820575e8-24a5-4f6e-94c0-70b353bb05ed",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "36d3d365-9b3d-4527-b6cf-874e04be3862",
+      "name": "Read Odoo Backoff 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3240,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 30,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "b4a9c41a-8d86-4810-ba06-b7140f875264",
+      "name": "Read Odoo Classify Error 4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3420,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "e103a2b1-fb4c-48e6-a295-9936f24dce7b",
+      "name": "Decode Odoo Read",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3600,
+        -160
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const decode=raw=>{let value=raw.structuredContent??raw.content?.find(x=>x.type==='text')?.text??raw;for(let i=0;i<4;i++){if(typeof value==='string'){value=JSON.parse(value);continue;}if(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===1&&Object.hasOwn(value,'result')){value=value.result;continue;}break;}if(!value||typeof value!=='object'||Array.isArray(value)||value.error)throw new Error('invalid_mcp_result');return value};return $input.all().map((item,index)=>({json:decode(item.json),pairedItem:{item:index}}));"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "82ef0071-9176-45cf-af30-c0ec1feb760d",
+      "name": "Aggregate Odoo Reads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3720,
+        -160
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:{results:$input.all().map(item=>item.json)}}];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "e07d0c76-8395-4bcc-b01c-a7d884ee6e08",
+      "name": "Calculate Tax Working Paper",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3840,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_TAX_RULES_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({request: $(\"Validate Event\").first().json.event.request, odoo: $json.results}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-tax-rules-header",
+          "name": "phase8-tax-rules-header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "e554d2fc-704f-469e-8412-31b2a15667ae",
+      "name": "Calculate Tax Working Paper Attempt 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        4080,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_TAX_RULES_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({request: $(\"Validate Event\").first().json.event.request, odoo: $json.results}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-tax-rules-header",
+          "name": "phase8-tax-rules-header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "a0652052-aa6c-48be-aae1-e0a121a5d97f",
+      "name": "Calculate Tax Working Paper Attempt 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        4320,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_TAX_RULES_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({request: $(\"Validate Event\").first().json.event.request, odoo: $json.results}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-tax-rules-header",
+          "name": "phase8-tax-rules-header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "7015a044-d6bd-4a3a-92b3-17e05a9073bc",
+      "name": "Calculate Tax Working Paper Attempt 4",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        4560,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_TAX_RULES_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({request: $(\"Validate Event\").first().json.event.request, odoo: $json.results}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-tax-rules-header",
+          "name": "phase8-tax-rules-header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c995c4ee-c672-4c6d-a915-b28abfc6e920",
+      "name": "Calculate Tax Working Paper Classify Error 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3900,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "db225a78-bcc5-44d9-8f6c-a6e15604ebcc",
+      "name": "Calculate Tax Working Paper Retryable 1?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3930,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "db225a78-bcc5-44d9-8f6c-a6e15604ebcc",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "bf3eb751-8bd7-4e02-b4a4-07f7c5952aaa",
+      "name": "Calculate Tax Working Paper Backoff 2s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3960,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "06c729dc-2e80-4060-bc78-a4ee1503e5ef",
+      "name": "Calculate Tax Working Paper Classify Error 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4140,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "67d3cefc-1a2d-4b26-93c5-31541db60fbd",
+      "name": "Calculate Tax Working Paper Retryable 2?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4170,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "67d3cefc-1a2d-4b26-93c5-31541db60fbd",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5c36a223-28a8-4e37-a3c5-ee9cb3ca9079",
+      "name": "Calculate Tax Working Paper Backoff 10s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4200,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 10,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "8d1bbac7-50f6-4723-a292-2f3cb4ff4a6b",
+      "name": "Calculate Tax Working Paper Classify Error 3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4380,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "22b3e952-bc51-4ef9-801c-1e05ebd4564b",
+      "name": "Calculate Tax Working Paper Retryable 3?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4410,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "22b3e952-bc51-4ef9-801c-1e05ebd4564b",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a4e5fe34-18a0-4039-83b4-b29b2aaa6081",
+      "name": "Calculate Tax Working Paper Backoff 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4440,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 30,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "6f1c2b15-8dd6-49d2-9ccb-5d78c516d835",
+      "name": "Calculate Tax Working Paper Classify Error 4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4620,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "0676ea0b-a065-4fe7-b978-654e1eec6d5a",
+      "name": "Build Review",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4800,
+        -160
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const crypto=require('crypto');const must=(ok,code)=>{if(!ok)throw new Error('permanent:'+code)};const base=$('Validate Event').first().json;const result=$input.first().json;must(result.rule_version===base.event.request.rule_version,'tax_rule_version');must(Array.isArray(result.calculation)&&result.calculation.length>=1,'tax_calculation');must(result.calculation.every(x=>typeof x.tax_object==='string'&&Number.isInteger(x.dpp_minor)&&Number.isInteger(x.rate_basis_points)&&Number.isInteger(x.tax_minor)&&typeof x.responsibility==='string'&&Array.isArray(x.evidence_refs)&&Array.isArray(x.assumptions)),'tax_calculation_fields');must(result.reconciliation&&Number.isInteger(result.reconciliation.odoo_total_minor)&&Number.isInteger(result.reconciliation.working_paper_total_minor)&&Number.isInteger(result.reconciliation.difference_minor)&&Array.isArray(result.reconciliation.missing_documents)&&Array.isArray(result.reconciliation.exceptions),'tax_reconciliation');const payload={request:base.event.request,calculation:result.calculation,reconciliation:result.reconciliation,review:{state:'pending',owner:'Tax Operations',reviewer_id:null,signoff_at:null,statutory_submission_allowed:false}};return [{json:{...base,capability:'id_tax_working_paper_signoff.v1',payload_hash:'sha256:'+crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex'),payload,approval_id:crypto.randomUUID(),reviewer_role:'tax_manager',expires_at:new Date(Date.now()+15*60*1000).toISOString()}}];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "5fb0e4cf-d5a8-42d2-a383-b49f359450ec",
+      "name": "Queue Review",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1680,
+        -80
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH approval AS (INSERT INTO phase8.approvals(approval_id,idempotency_key,capability,payload_hash,payload,reviewer_role,state,expires_at) VALUES ($1,$2,$3,$4,$5::jsonb,$6,'pending',$7) ON CONFLICT (idempotency_key,payload_hash) DO UPDATE SET expires_at=GREATEST(phase8.approvals.expires_at,EXCLUDED.expires_at) RETURNING approval_id,state,expires_at) UPDATE phase8.events SET status='review_pending',updated_at=now() WHERE idempotency_key=$2 RETURNING (SELECT approval_id FROM approval) approval_id,(SELECT state FROM approval) review_state,(SELECT expires_at FROM approval) expires_at",
+        "options": {
+          "queryReplacement": "={{ [$json.approval_id,$json.idempotency_key,$json.capability,$json.payload_hash,$json.payload,$json.reviewer_role,$json.expires_at] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "phase8-state-postgres",
+          "name": "phase8-state-postgres"
+        }
+      }
+    },
+    {
+      "id": "a259f86e-81d2-4cf6-8afc-10b6231983af",
+      "name": "Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1920,
+        -80
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {status:\"review_pending\", approval_id:$json.approval_id, expires_at:$json.expires_at} }}",
+        "options": {
+          "responseCode": 202
+        }
+      }
+    },
+    {
+      "id": "a8033c66-0d0a-4a98-b379-de50b26d3065",
+      "name": "Duplicate",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        960,
+        160
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {status:\"duplicate\", idempotency_key:$(\"Validate Event\").first().json.idempotency_key} }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "2c0a79e1-8e41-4923-87f1-aa90e1435ec2",
+      "name": "Queue Exception",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1440,
+        240
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH e AS (SELECT idempotency_key,correlation_id,owner FROM phase8.events WHERE idempotency_key=$1), ins AS (INSERT INTO phase8.exceptions(exception_id,idempotency_key,error_class,reason_code,owner) SELECT md5($1 || ':' || $3)::uuid,e.idempotency_key,$2,$3,e.owner FROM e ON CONFLICT (exception_id) DO NOTHING RETURNING exception_id) UPDATE phase8.events SET status='exception',updated_at=now() WHERE idempotency_key=$1 RETURNING COALESCE((SELECT exception_id FROM ins),md5($1 || ':' || $3)::uuid) exception_id,status",
+        "options": {
+          "queryReplacement": "={{ [$(\"Validate Event\").first().json.idempotency_key, $json.retryable === false ? 'permanent' : 'retryable', $json.retryable === false ? 'external_permanent_failure' : 'external_retry_exhausted'] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "phase8-state-postgres",
+          "name": "phase8-state-postgres"
+        }
+      }
+    },
+    {
+      "id": "874f048a-4c52-450f-b24a-a36d6cb2f156",
+      "name": "Queue Permanent Exception",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1200,
+        240
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH e AS (SELECT idempotency_key,owner FROM phase8.events WHERE idempotency_key=$1), ins AS (INSERT INTO phase8.exceptions(exception_id,idempotency_key,error_class,reason_code,owner) SELECT md5($1 || ':' || $2)::uuid,e.idempotency_key,'permanent',$2,e.owner FROM e ON CONFLICT (exception_id) DO NOTHING RETURNING exception_id) UPDATE phase8.events SET status='exception',updated_at=now() WHERE idempotency_key=$1 RETURNING COALESCE((SELECT exception_id FROM ins),md5($1 || ':' || $2)::uuid) exception_id,status",
+        "options": {
+          "queryReplacement": "={{ [$(\"Validate Event\").first().json.idempotency_key, $(\"Validate Event\").first().json.reason_code ?? 'processing_validation_failed'] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "phase8-state-postgres",
+          "name": "phase8-state-postgres"
+        }
+      }
+    },
+    {
+      "id": "054a622f-e2a9-4d2b-a21d-381996cb6c0a",
+      "name": "Alert Owner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1680,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_ALERT_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({workflow:'indonesian-tax-working-papers',owner:'Tax Operations',status:$json.status,exception_id:$json.exception_id,correlation_id:$(\"Validate Event\").first().json.correlation_id,idempotency_key:$(\"Validate Event\").first().json.idempotency_key}) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-alert-webhook",
+          "name": "phase8-alert-webhook"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "cea83a48-17ef-4ac2-aa7b-ca8a732cd9b0",
+      "name": "Alert Owner Attempt 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1920,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_ALERT_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({workflow:'indonesian-tax-working-papers',owner:'Tax Operations',status:$json.status,exception_id:$json.exception_id,correlation_id:$(\"Validate Event\").first().json.correlation_id,idempotency_key:$(\"Validate Event\").first().json.idempotency_key}) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-alert-webhook",
+          "name": "phase8-alert-webhook"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "00b53216-691f-4126-afe5-e5bb8ba3f0fc",
+      "name": "Alert Owner Attempt 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2160,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_ALERT_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({workflow:'indonesian-tax-working-papers',owner:'Tax Operations',status:$json.status,exception_id:$json.exception_id,correlation_id:$(\"Validate Event\").first().json.correlation_id,idempotency_key:$(\"Validate Event\").first().json.idempotency_key}) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-alert-webhook",
+          "name": "phase8-alert-webhook"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "185ae670-e3c7-4da2-843e-195c003f4116",
+      "name": "Alert Owner Attempt 4",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2400,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_ALERT_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({workflow:'indonesian-tax-working-papers',owner:'Tax Operations',status:$json.status,exception_id:$json.exception_id,correlation_id:$(\"Validate Event\").first().json.correlation_id,idempotency_key:$(\"Validate Event\").first().json.idempotency_key}) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-alert-webhook",
+          "name": "phase8-alert-webhook"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "eaa20262-1dca-49e3-8334-a5b536ee834a",
+      "name": "Alert Owner Classify Error 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1740,
+        360
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "f70f9f35-6a7c-4ce0-89cd-bae59093dea7",
+      "name": "Alert Owner Retryable 1?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1770,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f70f9f35-6a7c-4ce0-89cd-bae59093dea7",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c30a0b3a-fc61-482e-ac4f-76cd3462c89a",
+      "name": "Alert Owner Backoff 2s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1800,
+        400
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "4a6b285a-90fb-4d5a-938b-e1de0a92ed74",
+      "name": "Alert Owner Classify Error 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        360
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "da26f94d-3042-4db8-a03c-6324993f0739",
+      "name": "Alert Owner Retryable 2?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2010,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "da26f94d-3042-4db8-a03c-6324993f0739",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a3f4d943-dff5-42f4-8bac-6799e9e2ce82",
+      "name": "Alert Owner Backoff 10s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2040,
+        400
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 10,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "0d22adc7-7e2b-4b44-9f1b-e3d2ad35cf40",
+      "name": "Alert Owner Classify Error 3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        360
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "8d8e11c7-d0bc-411f-bcb2-ac48e2730bf6",
+      "name": "Alert Owner Retryable 3?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2250,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "8d8e11c7-d0bc-411f-bcb2-ac48e2730bf6",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ab56d9d7-b47d-4a24-bbc6-b5e9bd717fba",
+      "name": "Alert Owner Backoff 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2280,
+        400
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 30,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "a8809351-b396-493f-b39e-30878c98111d",
+      "name": "Alert Owner Classify Error 4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2460,
+        360
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "1066e502-ba10-47e7-9b16-d91425ba433f",
+      "name": "Alert End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        240
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "7a91465e-41f6-456b-9276-f24a24bb0c81",
+      "name": "Exception Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1680,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {status:$json.status, exception_id:$json.exception_id} }}",
+        "options": {
+          "responseCode": 503
+        }
+      }
+    },
+    {
+      "id": "a286ed41-a0e3-402d-9311-d1deb567ad37",
+      "name": "Permanent Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1440,
+        360
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {status:\"exception\", exception_id:$json.exception_id} }}",
+        "options": {
+          "responseCode": 422
+        }
+      }
+    },
+    {
+      "id": "45664e83-309d-4667-9b3a-6e9803e778af",
+      "name": "Approval Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        520
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "phase8/indonesian-tax-working-papers/v1/approval",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "c35cfff1-abdd-4c17-99cf-cd0463c974f1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-webhook-header",
+          "name": "phase8-webhook-header"
+        }
+      }
+    },
+    {
+      "id": "b26fe6c1-8c1f-4a3d-89a1-30abce439831",
+      "name": "Validate Approval",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        520
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const b=$input.first().json.body??$input.first().json;const must=(x,c)=>{if(!x)throw new Error('permanent:'+c)};must(/^[0-9a-f-]{36}$/.test(b.approval_id||''),'approval_id');must(['approved','rejected'].includes(b.decision),'decision');must(typeof b.reviewer_id==='string'&&b.reviewer_id.length>=1&&b.reviewer_id.length<=100,'reviewer_id');must(/^sha256:[0-9a-f]{64}$/.test(b.payload_hash||''),'payload_hash');return [{json:{...b,reviewer_role:'tax_manager'}}];"
+      }
+    },
+    {
+      "id": "ca0ccbb4-4a1b-4779-b300-034d63a3e8ab",
+      "name": "Consume Approval",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        480,
+        520
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH decided AS (UPDATE phase8.approvals SET state=CASE WHEN $2='approved' THEN 'consumed' ELSE 'rejected' END,reviewer_id=$3,consumed_at=CASE WHEN $2='approved' THEN now() ELSE NULL END WHERE approval_id=$1 AND state='pending' AND expires_at>now() AND payload_hash=$4 AND reviewer_role=$5 RETURNING approval_id,idempotency_key,capability,payload_hash,payload,reviewer_id,state), event AS (UPDATE phase8.events e SET status=CASE WHEN d.state='consumed' THEN 'approved' ELSE 'rejected' END,updated_at=now() FROM decided d WHERE e.idempotency_key=d.idempotency_key RETURNING e.idempotency_key) SELECT d.*,d.state='consumed' AS approved FROM decided d JOIN event e USING(idempotency_key)",
+        "options": {
+          "queryReplacement": "={{ [$json.approval_id,$json.decision,$json.reviewer_id,$json.payload_hash,$json.reviewer_role] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "phase8-state-postgres",
+          "name": "phase8-state-postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "e3cdb190-00ef-435d-916e-a9740c040bd4",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        720,
+        520
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "8e267beb-2f3c-4296-8278-76b46e779c94",
+              "leftValue": "={{ $json.approved }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "912db874-e3f3-4d40-ad33-35bf99c2a11b",
+      "name": "Complete",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        960,
+        440
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH paper AS (UPDATE phase8.approvals SET payload=jsonb_set(payload,'{review}',jsonb_build_object('state','signed_off','owner','Tax Operations','reviewer_id',$3,'signoff_at',now(),'statutory_submission_allowed',false)) WHERE approval_id=$2 RETURNING payload) UPDATE phase8.events SET status='completed',updated_at=now() WHERE idempotency_key=$1 RETURNING idempotency_key,status,(SELECT payload FROM paper) working_paper",
+        "options": {
+          "queryReplacement": "={{ [$json.idempotency_key,$json.approval_id,$json.reviewer_id] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "phase8-state-postgres",
+          "name": "phase8-state-postgres"
+        }
+      }
+    },
+    {
+      "id": "0d4c40c0-21ab-4e26-a453-990338bde475",
+      "name": "Approval Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1920,
+        440
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "0d9cd8cd-ab4d-4726-b08b-588c2df56604",
+      "name": "Rejected Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        960,
+        600
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {status:\"rejected_or_invalid\"} }}",
+        "options": {
+          "responseCode": 409
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Read Odoo": {
+      "main": [
+        [
+          {
+            "node": "Decode Odoo Read",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Odoo Classify Error 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Classify Error 1": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Retryable 1?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Retryable 1?": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Backoff 2s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Backoff 2s": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Attempt 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Attempt 2": {
+      "main": [
+        [
+          {
+            "node": "Decode Odoo Read",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Odoo Classify Error 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Classify Error 2": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Retryable 2?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Retryable 2?": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Backoff 10s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Backoff 10s": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Attempt 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Attempt 3": {
+      "main": [
+        [
+          {
+            "node": "Decode Odoo Read",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Odoo Classify Error 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Classify Error 3": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Retryable 3?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Retryable 3?": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Backoff 30s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Backoff 30s": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Attempt 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Attempt 4": {
+      "main": [
+        [
+          {
+            "node": "Decode Odoo Read",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Odoo Classify Error 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Classify Error 4": {
+      "main": [
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Tax Working Paper": {
+      "main": [
+        [
+          {
+            "node": "Build Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Calculate Tax Working Paper Classify Error 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Tax Working Paper Classify Error 1": {
+      "main": [
+        [
+          {
+            "node": "Calculate Tax Working Paper Retryable 1?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Tax Working Paper Retryable 1?": {
+      "main": [
+        [
+          {
+            "node": "Calculate Tax Working Paper Backoff 2s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Tax Working Paper Backoff 2s": {
+      "main": [
+        [
+          {
+            "node": "Calculate Tax Working Paper Attempt 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Tax Working Paper Attempt 2": {
+      "main": [
+        [
+          {
+            "node": "Build Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Calculate Tax Working Paper Classify Error 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Tax Working Paper Classify Error 2": {
+      "main": [
+        [
+          {
+            "node": "Calculate Tax Working Paper Retryable 2?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Tax Working Paper Retryable 2?": {
+      "main": [
+        [
+          {
+            "node": "Calculate Tax Working Paper Backoff 10s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Tax Working Paper Backoff 10s": {
+      "main": [
+        [
+          {
+            "node": "Calculate Tax Working Paper Attempt 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Tax Working Paper Attempt 3": {
+      "main": [
+        [
+          {
+            "node": "Build Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Calculate Tax Working Paper Classify Error 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Tax Working Paper Classify Error 3": {
+      "main": [
+        [
+          {
+            "node": "Calculate Tax Working Paper Retryable 3?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Tax Working Paper Retryable 3?": {
+      "main": [
+        [
+          {
+            "node": "Calculate Tax Working Paper Backoff 30s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Tax Working Paper Backoff 30s": {
+      "main": [
+        [
+          {
+            "node": "Calculate Tax Working Paper Attempt 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Tax Working Paper Attempt 4": {
+      "main": [
+        [
+          {
+            "node": "Build Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Calculate Tax Working Paper Classify Error 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Tax Working Paper Classify Error 4": {
+      "main": [
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner": {
+      "main": [
+        [
+          {
+            "node": "Alert End",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Owner Classify Error 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Classify Error 1": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Retryable 1?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Retryable 1?": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Backoff 2s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Backoff 2s": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Attempt 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Attempt 2": {
+      "main": [
+        [
+          {
+            "node": "Alert End",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Owner Classify Error 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Classify Error 2": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Retryable 2?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Retryable 2?": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Backoff 10s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Backoff 10s": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Attempt 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Attempt 3": {
+      "main": [
+        [
+          {
+            "node": "Alert End",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Owner Classify Error 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Classify Error 3": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Retryable 3?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Retryable 3?": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Backoff 30s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Backoff 30s": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Attempt 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Attempt 4": {
+      "main": [
+        [
+          {
+            "node": "Alert End",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Owner Classify Error 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Classify Error 4": {
+      "main": [
+        [
+          {
+            "node": "Alert End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Event": {
+      "main": [
+        [
+          {
+            "node": "Claim Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Event": {
+      "main": [
+        [
+          {
+            "node": "Is New",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is New": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Odoo Reads",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Permanent Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Odoo Reads": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Permanent Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decode Odoo Read": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Odoo Reads",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Permanent Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Odoo Reads": {
+      "main": [
+        [
+          {
+            "node": "Calculate Tax Working Paper",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Permanent Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Review": {
+      "main": [
+        [
+          {
+            "node": "Queue Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Permanent Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Exception": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Exception Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Permanent Exception": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Permanent Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Review": {
+      "main": [
+        [
+          {
+            "node": "Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approval Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Approval": {
+      "main": [
+        [
+          {
+            "node": "Consume Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consume Approval": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Complete",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rejected Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete": {
+      "main": [
+        [
+          {
+            "node": "Approval Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Jakarta",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "executionTimeout": 300
+  },
+  "versionId": "7fc3650e-7092-4bb1-a5c5-eebd7964411b",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "phase": 8,
+    "schemaVersion": "1.0",
+    "productionApproved": false
+  },
+  "tags": []
+}

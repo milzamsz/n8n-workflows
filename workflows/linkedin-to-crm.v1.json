@@ -1,0 +1,4008 @@
+{
+  "name": "Phase 8 - LinkedIn to CRM v1",
+  "nodes": [
+    {
+      "id": "245b8a35-557f-484e-a8db-b47e765458c5",
+      "name": "Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "phase8/linkedin-to-crm/v1",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "eadc820c-df2b-412f-bbf8-162661fca7ad",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-webhook-header",
+          "name": "phase8-webhook-header"
+        }
+      }
+    },
+    {
+      "id": "660e0372-6d82-4a2c-81ec-67f1bb0796c7",
+      "name": "Validate Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst crypto=require('crypto'); const sha=v=>crypto.createHash('sha256').update(v).digest('hex'); const must=(ok,code)=>{if(!ok)throw new Error('permanent:'+code)};\nlet body=$input.first().json.body ?? $input.first().json;let reason_code=null;try{must(/^https:\\/\\/([a-z]+\\.)?linkedin\\.com\\//.test(body.source?.url || ''), 'source_url');must(['operator_url','approved_export'].includes(body.source?.capture_mechanism),'capture_mechanism');must(!Number.isNaN(Date.parse(body.source?.captured_at||'')),'captured_at');must(typeof body.source?.provenance==='string'&&body.source.provenance.length>=3&&body.source.provenance.length<=512,'provenance');must(body&&typeof body==='object'&&!Array.isArray(body),'body');must(typeof body.artifact_ref==='string'&&body.artifact_ref.length>=3&&body.artifact_ref.length<=512,'artifact_ref');must(/^sha256:[0-9a-f]{64}$/.test(body.content_hash||''),'content_hash');}catch(error){reason_code=String(error.message||error).replace(/^permanent:/,'').slice(0,100);}\nconst raw=JSON.stringify(body??{});const valid=reason_code===null;const content_hash=/^sha256:[0-9a-f]{64}$/.test(body?.content_hash||'')?body.content_hash:'sha256:'+sha(raw);const artifact_ref=typeof body?.artifact_ref==='string'&&body.artifact_ref.length>=3&&body.artifact_ref.length<=512?body.artifact_ref:'rejected://n8n-linkedin-crm/'+sha(raw).slice(0,32);\nconst correlation_id=crypto.randomUUID(); const idempotency_key='linkedin-to-crm:v1:'+sha('linkedin.crm_lead_candidate.v1|ocloud-staging|1|'+artifact_ref+'|'+content_hash);\nreturn [{json:{valid,reason_code,event:body,event_type:'linkedin.crm_lead_candidate.v1',schema_version:'1.0',correlation_id,idempotency_key,content_hash,artifact_ref,owner:'CRM Operations',actor:'n8n-linkedin-crm',context:{instance_id:'ocloud-staging',company_id:1,profile_id:'draft-operations'}}}];"
+      }
+    },
+    {
+      "id": "e5fc6f27-9ba1-4abb-915b-0b2e701d011c",
+      "name": "Claim Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH claimed AS (INSERT INTO phase8.events(idempotency_key,workflow,schema_version,correlation_id,content_hash,artifact_ref,status,owner) VALUES ($1,$2,$3,$4,$5,$6,CASE WHEN $8 THEN 'received' ELSE 'exception' END,$7) ON CONFLICT DO NOTHING RETURNING 1) SELECT EXISTS(SELECT 1 FROM claimed) AS claimed",
+        "options": {
+          "queryReplacement": "={{ [$json.idempotency_key, $json.event_type, $json.schema_version, $json.correlation_id, $json.content_hash, $json.artifact_ref, $json.owner, $json.valid] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "phase8-state-postgres",
+          "name": "phase8-state-postgres"
+        }
+      }
+    },
+    {
+      "id": "9f69f59a-ea2c-4e54-afb5-6002406156d2",
+      "name": "Is New",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f02e6a1a-37f2-4a7f-a24e-922b606145f4",
+              "leftValue": "={{ $json.claimed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "24a883ec-a57f-4d00-ac3d-4813bcbabd84",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        960,
+        -80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "36540bda-ccbe-465f-8b0b-b4acd1442983",
+              "leftValue": "={{ $(\"Validate Event\").first().json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "898b9ba2-52d6-4f40-95b9-9909f10cd502",
+      "name": "Extract Source",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1200,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_EXTRACTOR_URL }}/linkedin-to-crm/extract/v1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($(\"Validate Event\").first().json.event) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-extractor-header",
+          "name": "phase8-extractor-header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "fd7676a9-dd51-4901-bfe6-6139ba678cf4",
+      "name": "Extract Source Attempt 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1440,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_EXTRACTOR_URL }}/linkedin-to-crm/extract/v1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($(\"Validate Event\").first().json.event) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-extractor-header",
+          "name": "phase8-extractor-header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "8ff078ad-4a6f-43b3-8e74-810f59c24a82",
+      "name": "Extract Source Attempt 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1680,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_EXTRACTOR_URL }}/linkedin-to-crm/extract/v1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($(\"Validate Event\").first().json.event) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-extractor-header",
+          "name": "phase8-extractor-header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "b48f45f9-a142-4304-b9e1-889f26fbb126",
+      "name": "Extract Source Attempt 4",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1920,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_EXTRACTOR_URL }}/linkedin-to-crm/extract/v1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($(\"Validate Event\").first().json.event) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-extractor-header",
+          "name": "phase8-extractor-header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "2e3ad6ce-02c8-47fa-b806-849ac9460027",
+      "name": "Extract Source Classify Error 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1260,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "84ddbadb-29a2-4646-89b3-de865471880e",
+      "name": "Extract Source Retryable 1?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1290,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "84ddbadb-29a2-4646-89b3-de865471880e",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7eabe049-e66d-4732-b62d-55bc81552182",
+      "name": "Extract Source Backoff 2s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "332cfe16-053c-4223-8aeb-507899f33a1c",
+      "name": "Extract Source Classify Error 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "ff5884f5-265d-408b-9370-6daf0507c1bd",
+      "name": "Extract Source Retryable 2?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1530,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "ff5884f5-265d-408b-9370-6daf0507c1bd",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c84f7fd4-57a4-40b4-a2a4-8ff2d7a1fde1",
+      "name": "Extract Source Backoff 10s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1560,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 10,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "d48c3026-3ef2-42e9-be83-192748f9f6eb",
+      "name": "Extract Source Classify Error 3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1740,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "ee26cd2c-0cb7-4600-bff4-ccc66ad46b67",
+      "name": "Extract Source Retryable 3?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1770,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "ee26cd2c-0cb7-4600-bff4-ccc66ad46b67",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "206268b0-7024-49a7-9b43-b59a2e82203c",
+      "name": "Extract Source Backoff 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1800,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 30,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "37d881b2-a402-4ecb-8a01-1b6edd002e34",
+      "name": "Extract Source Classify Error 4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "a13ecc2c-f37b-425a-84b6-f6b21b026fb6",
+      "name": "Validate Extraction",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        -160
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const result=$input.first().json;const must=(ok,code)=>{if(!ok)throw new Error('permanent:'+code)};if(result.error_class==='permanent')throw new Error('permanent:'+result.reason_code);const e=result.extraction;must(e&&typeof e==='object','extraction');for(const k of ['organization','person','stated_need','location']){const f=e[k];must(f&&typeof f==='object'&&typeof f.confidence==='number'&&Array.isArray(f.evidence_refs),k);}must(Array.isArray(e.facts)&&Array.isArray(e.inferences),'fact_inference_separation');return [{json:result}];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "9f7a5046-1ef2-47b4-9f02-cde737942d0f",
+      "name": "Prepare Odoo Reads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        -160
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const e=$('Validate Extraction').first().json.extraction;const org=e.organization.value??'';const person=e.person.value??'';const context={allowed_company_ids:[1],force_company:1};return [{json:{instance:'ocloud-staging',model:'res.partner',domain:['|',['company_id','=',false],['company_id','=',1],['name','ilike',String(org||person).slice(0,200)]],fields:['id','name','company_id'],limit:20,context}},{json:{instance:'ocloud-staging',model:'crm.lead',domain:[['company_id','=',1],['name','ilike',String(org||person).slice(0,200)]],fields:['id','name','partner_name','company_id','type'],limit:20,context}}];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "b01b3974-3bbe-4b32-b1ae-e2a5331525c4",
+      "name": "Read Odoo",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        2640,
+        -160
+      ],
+      "parameters": {
+        "serverTransport": "httpStreamable",
+        "endpointUrl": "={{ $env.ODOO_MCP_STAGING_URL }}",
+        "authentication": "bearerAuth",
+        "tool": {
+          "mode": "id",
+          "value": "odoo_search_read"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "convertToBinary": false
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "odoo-mcp-staging-bearer",
+          "name": "odoo-mcp-staging-bearer"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c148e852-c291-4d65-b12f-b93e0d4ac968",
+      "name": "Read Odoo Attempt 2",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        2880,
+        -160
+      ],
+      "parameters": {
+        "serverTransport": "httpStreamable",
+        "endpointUrl": "={{ $env.ODOO_MCP_STAGING_URL }}",
+        "authentication": "bearerAuth",
+        "tool": {
+          "mode": "id",
+          "value": "odoo_search_read"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "convertToBinary": false
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "odoo-mcp-staging-bearer",
+          "name": "odoo-mcp-staging-bearer"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "1bef8b86-5c8c-453a-8e6f-8743fe4e1556",
+      "name": "Read Odoo Attempt 3",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        3120,
+        -160
+      ],
+      "parameters": {
+        "serverTransport": "httpStreamable",
+        "endpointUrl": "={{ $env.ODOO_MCP_STAGING_URL }}",
+        "authentication": "bearerAuth",
+        "tool": {
+          "mode": "id",
+          "value": "odoo_search_read"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "convertToBinary": false
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "odoo-mcp-staging-bearer",
+          "name": "odoo-mcp-staging-bearer"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "f85fe3ed-c150-48ae-b3a6-c70f258467b7",
+      "name": "Read Odoo Attempt 4",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        3360,
+        -160
+      ],
+      "parameters": {
+        "serverTransport": "httpStreamable",
+        "endpointUrl": "={{ $env.ODOO_MCP_STAGING_URL }}",
+        "authentication": "bearerAuth",
+        "tool": {
+          "mode": "id",
+          "value": "odoo_search_read"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "convertToBinary": false
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "odoo-mcp-staging-bearer",
+          "name": "odoo-mcp-staging-bearer"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "8c311257-1abb-4b8c-a8fc-20b7c413e938",
+      "name": "Read Odoo Classify Error 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2700,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "58672c7a-f0fb-472a-babe-a26a450ff03f",
+      "name": "Read Odoo Retryable 1?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2730,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "58672c7a-f0fb-472a-babe-a26a450ff03f",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "83c7cb38-39ad-4038-8f42-2ed53bd80e08",
+      "name": "Read Odoo Backoff 2s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2760,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "3b67df80-e0c8-4d68-acaa-eee2388218ea",
+      "name": "Read Odoo Classify Error 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2940,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "b3ccd498-8af1-4e9d-a542-8f3626e3d7b4",
+      "name": "Read Odoo Retryable 2?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2970,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "b3ccd498-8af1-4e9d-a542-8f3626e3d7b4",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "2326b643-86aa-421d-953e-cdcd3e51bd13",
+      "name": "Read Odoo Backoff 10s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3000,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 10,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "bbc6c401-bc98-48b6-a854-13b02ca66a8d",
+      "name": "Read Odoo Classify Error 3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3180,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "99576e35-471b-4759-863f-44edbb6d804a",
+      "name": "Read Odoo Retryable 3?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3210,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "99576e35-471b-4759-863f-44edbb6d804a",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "2ce282ef-acea-4a7d-a59e-56a41eba8517",
+      "name": "Read Odoo Backoff 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3240,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 30,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "5211c6b1-173a-4389-928d-4ed4ada00976",
+      "name": "Read Odoo Classify Error 4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3420,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "6755a83d-9f83-4b38-aa2d-9677d681e8b1",
+      "name": "Decode Odoo Read",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3600,
+        -160
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const decode=raw=>{let value=raw.structuredContent??raw.content?.find(x=>x.type==='text')?.text??raw;for(let i=0;i<4;i++){if(typeof value==='string'){value=JSON.parse(value);continue;}if(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===1&&Object.hasOwn(value,'result')){value=value.result;continue;}break;}if(!value||typeof value!=='object'||Array.isArray(value)||value.error)throw new Error('invalid_mcp_result');return value};return $input.all().map((item,index)=>({json:decode(item.json),pairedItem:{item:index}}));"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "17304833-c0ae-47a3-9e03-dc2651dc81f9",
+      "name": "Aggregate Odoo Reads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3720,
+        -160
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:{results:$input.all().map(item=>item.json)}}];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "ead0bcc7-1321-427f-be3c-a2eb48cbcf80",
+      "name": "Match and Prepare Review",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3840,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_EXTRACTOR_URL }}/linkedin-to-crm/match/v1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({event: $(\"Validate Event\").first().json.event, extraction: $(\"Validate Extraction\").first().json, odoo: $json.results}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-extractor-header",
+          "name": "phase8-extractor-header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "38238ce3-b0e6-4265-ae5c-b291873e20e3",
+      "name": "Match and Prepare Review Attempt 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        4080,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_EXTRACTOR_URL }}/linkedin-to-crm/match/v1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({event: $(\"Validate Event\").first().json.event, extraction: $(\"Validate Extraction\").first().json, odoo: $json.results}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-extractor-header",
+          "name": "phase8-extractor-header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "6d963aec-34d6-4639-8587-4aa18d0809ae",
+      "name": "Match and Prepare Review Attempt 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        4320,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_EXTRACTOR_URL }}/linkedin-to-crm/match/v1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({event: $(\"Validate Event\").first().json.event, extraction: $(\"Validate Extraction\").first().json, odoo: $json.results}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-extractor-header",
+          "name": "phase8-extractor-header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "de7d6602-120a-48b9-b597-61d80ebd4d93",
+      "name": "Match and Prepare Review Attempt 4",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        4560,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_EXTRACTOR_URL }}/linkedin-to-crm/match/v1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({event: $(\"Validate Event\").first().json.event, extraction: $(\"Validate Extraction\").first().json, odoo: $json.results}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-extractor-header",
+          "name": "phase8-extractor-header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "75c43d05-7454-4874-bc92-9d4033142307",
+      "name": "Match and Prepare Review Classify Error 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3900,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "102b25bf-eb40-41a8-86fc-2ac81d30aea9",
+      "name": "Match and Prepare Review Retryable 1?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3930,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "102b25bf-eb40-41a8-86fc-2ac81d30aea9",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dceab9e1-5e2a-4046-a49a-03de1851cd52",
+      "name": "Match and Prepare Review Backoff 2s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3960,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "f207454b-6f78-4375-b440-30f3ce715b7b",
+      "name": "Match and Prepare Review Classify Error 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4140,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "a7192f77-21fc-42e9-bd86-c5dd70f44879",
+      "name": "Match and Prepare Review Retryable 2?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4170,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "a7192f77-21fc-42e9-bd86-c5dd70f44879",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "83eb0f49-8bba-4e34-8084-356af636b609",
+      "name": "Match and Prepare Review Backoff 10s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4200,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 10,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "87e979ce-6b29-4c0e-99e7-35406dacf3bb",
+      "name": "Match and Prepare Review Classify Error 3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4380,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "cca1a874-cd8b-46ce-96a9-c270f0c216e4",
+      "name": "Match and Prepare Review Retryable 3?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4410,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cca1a874-cd8b-46ce-96a9-c270f0c216e4",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f8e77a16-11d6-405b-8d7d-241dae895bdb",
+      "name": "Match and Prepare Review Backoff 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4440,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 30,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "dde799fa-ce53-46c0-adf9-6d8fb9176e06",
+      "name": "Match and Prepare Review Classify Error 4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4620,
+        -40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "31476587-328e-4526-96d6-b96ef7a41809",
+      "name": "Build Review",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4800,
+        -160
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst crypto=require('crypto');const must=(ok,code)=>{if(!ok)throw new Error('permanent:'+code)};const base=$('Validate Event').first().json;const result=$input.first().json;if(result.error_class==='permanent')throw new Error('permanent:'+result.reason_code);must(result.duplicates&&Array.isArray(result.duplicates.partner_candidates)&&Array.isArray(result.duplicates.lead_candidates)&&typeof result.duplicates.match_explanation==='string','duplicate_evidence');must(result.review?.state==='pending'&&result.review?.owner==='CRM Operations','review_state');const payload=result.capability_payload;if(!payload||typeof payload!=='object'||Array.isArray(payload))throw new Error('permanent:missing_review_payload');const payload_hash='sha256:'+crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');return [{json:{...base,approval_id:crypto.randomUUID(),capability:'create_crm_lead_draft.v1',reviewer_role:'crm_manager',payload_hash,payload,expires_at:new Date(Date.now()+15*60*1000).toISOString()}}];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "926d546a-43e3-4c08-a19d-a2d9f4ecfad3",
+      "name": "Queue Review",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1680,
+        -80
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH approval AS (INSERT INTO phase8.approvals(approval_id,idempotency_key,capability,payload_hash,payload,reviewer_role,state,expires_at) VALUES ($1,$2,$3,$4,$5::jsonb,$6,'pending',$7) ON CONFLICT (idempotency_key,payload_hash) DO UPDATE SET expires_at=GREATEST(phase8.approvals.expires_at,EXCLUDED.expires_at) RETURNING approval_id,state,expires_at) UPDATE phase8.events SET status='review_pending',updated_at=now() WHERE idempotency_key=$2 RETURNING (SELECT approval_id FROM approval) approval_id,(SELECT state FROM approval) review_state,(SELECT expires_at FROM approval) expires_at",
+        "options": {
+          "queryReplacement": "={{ [$json.approval_id,$json.idempotency_key,$json.capability,$json.payload_hash,$json.payload,$json.reviewer_role,$json.expires_at] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "phase8-state-postgres",
+          "name": "phase8-state-postgres"
+        }
+      }
+    },
+    {
+      "id": "9384db06-969b-41ac-849a-8e395968b628",
+      "name": "Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1920,
+        -80
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {status:\"review_pending\", approval_id:$json.approval_id, expires_at:$json.expires_at} }}",
+        "options": {
+          "responseCode": 202
+        }
+      }
+    },
+    {
+      "id": "1f6d3c23-8e02-4826-9b1e-4a3fa46e45b4",
+      "name": "Duplicate",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        960,
+        160
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {status:\"duplicate\", idempotency_key:$(\"Validate Event\").first().json.idempotency_key} }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "605ce11f-4397-4f9a-8e2a-c5f7ff23c748",
+      "name": "Queue Exception",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1440,
+        240
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH e AS (SELECT idempotency_key,correlation_id,owner FROM phase8.events WHERE idempotency_key=$1), ins AS (INSERT INTO phase8.exceptions(exception_id,idempotency_key,error_class,reason_code,owner) SELECT md5($1 || ':' || $3)::uuid,e.idempotency_key,$2,$3,e.owner FROM e ON CONFLICT (exception_id) DO NOTHING RETURNING exception_id) UPDATE phase8.events SET status='exception',updated_at=now() WHERE idempotency_key=$1 RETURNING COALESCE((SELECT exception_id FROM ins),md5($1 || ':' || $3)::uuid) exception_id,status",
+        "options": {
+          "queryReplacement": "={{ [$(\"Validate Event\").first().json.idempotency_key, $json.retryable === false ? 'permanent' : 'retryable', $json.retryable === false ? 'external_permanent_failure' : 'external_retry_exhausted'] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "phase8-state-postgres",
+          "name": "phase8-state-postgres"
+        }
+      }
+    },
+    {
+      "id": "073082b2-44ec-4f5c-b3f8-d6c3b30096f6",
+      "name": "Queue Permanent Exception",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1200,
+        240
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH e AS (SELECT idempotency_key,owner FROM phase8.events WHERE idempotency_key=$1), ins AS (INSERT INTO phase8.exceptions(exception_id,idempotency_key,error_class,reason_code,owner) SELECT md5($1 || ':' || $2)::uuid,e.idempotency_key,'permanent',$2,e.owner FROM e ON CONFLICT (exception_id) DO NOTHING RETURNING exception_id) UPDATE phase8.events SET status='exception',updated_at=now() WHERE idempotency_key=$1 RETURNING COALESCE((SELECT exception_id FROM ins),md5($1 || ':' || $2)::uuid) exception_id,status",
+        "options": {
+          "queryReplacement": "={{ [$(\"Validate Event\").first().json.idempotency_key, $(\"Validate Event\").first().json.reason_code ?? 'processing_validation_failed'] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "phase8-state-postgres",
+          "name": "phase8-state-postgres"
+        }
+      }
+    },
+    {
+      "id": "c7cc2ac4-920c-4235-a4a2-c5a65b54cda9",
+      "name": "Alert Owner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1680,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_ALERT_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({workflow:'linkedin-to-crm',owner:'CRM Operations',status:$json.status,exception_id:$json.exception_id,correlation_id:$(\"Validate Event\").first().json.correlation_id,idempotency_key:$(\"Validate Event\").first().json.idempotency_key}) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-alert-webhook",
+          "name": "phase8-alert-webhook"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "7ebbc0d2-78ee-4842-9cd5-5bbf1901656f",
+      "name": "Alert Owner Attempt 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1920,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_ALERT_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({workflow:'linkedin-to-crm',owner:'CRM Operations',status:$json.status,exception_id:$json.exception_id,correlation_id:$(\"Validate Event\").first().json.correlation_id,idempotency_key:$(\"Validate Event\").first().json.idempotency_key}) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-alert-webhook",
+          "name": "phase8-alert-webhook"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "3ca5af92-5ffe-4d90-9c1d-22051e788ae9",
+      "name": "Alert Owner Attempt 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2160,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_ALERT_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({workflow:'linkedin-to-crm',owner:'CRM Operations',status:$json.status,exception_id:$json.exception_id,correlation_id:$(\"Validate Event\").first().json.correlation_id,idempotency_key:$(\"Validate Event\").first().json.idempotency_key}) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-alert-webhook",
+          "name": "phase8-alert-webhook"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "1436574f-e170-4d31-aa87-6c686075c588",
+      "name": "Alert Owner Attempt 4",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2400,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PHASE8_ALERT_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({workflow:'linkedin-to-crm',owner:'CRM Operations',status:$json.status,exception_id:$json.exception_id,correlation_id:$(\"Validate Event\").first().json.correlation_id,idempotency_key:$(\"Validate Event\").first().json.idempotency_key}) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-alert-webhook",
+          "name": "phase8-alert-webhook"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "ce3c901a-3ace-4a22-95fc-a752ce2f0650",
+      "name": "Alert Owner Classify Error 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1740,
+        360
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "9eb757f8-17a2-403b-a438-6aef099512bb",
+      "name": "Alert Owner Retryable 1?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1770,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "9eb757f8-17a2-403b-a438-6aef099512bb",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "62c65c63-a0a4-4d51-ab1d-4efc33586c01",
+      "name": "Alert Owner Backoff 2s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1800,
+        400
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "107dc82f-338f-4ad3-abac-8214931e2420",
+      "name": "Alert Owner Classify Error 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        360
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "ff55b2a7-f83d-4398-9e91-5e9ddfea8271",
+      "name": "Alert Owner Retryable 2?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2010,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "ff55b2a7-f83d-4398-9e91-5e9ddfea8271",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b7481a68-d0d2-44ca-9e73-cbb7bb64a8e9",
+      "name": "Alert Owner Backoff 10s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2040,
+        400
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 10,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "e72c2d73-dea8-48b5-bf87-6f4de35eb510",
+      "name": "Alert Owner Classify Error 3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        360
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "4a048405-e1fe-445d-94de-7133a005657f",
+      "name": "Alert Owner Retryable 3?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2250,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "4a048405-e1fe-445d-94de-7133a005657f",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c8b4f371-e241-453c-8d58-6e19c76261f2",
+      "name": "Alert Owner Backoff 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2280,
+        400
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 30,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "3410f6bc-0a8b-43f4-84dd-e01034329b64",
+      "name": "Alert Owner Classify Error 4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2460,
+        360
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "7e7457ef-461a-49fb-9e36-8b36a927163f",
+      "name": "Alert End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        240
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "b8aff7c5-abdd-4761-b1d2-1069abd1d860",
+      "name": "Exception Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1680,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {status:$json.status, exception_id:$json.exception_id} }}",
+        "options": {
+          "responseCode": 503
+        }
+      }
+    },
+    {
+      "id": "bba4dfe8-147e-4f98-8e44-f4ffbbe2f701",
+      "name": "Permanent Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1440,
+        360
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {status:\"exception\", exception_id:$json.exception_id} }}",
+        "options": {
+          "responseCode": 422
+        }
+      }
+    },
+    {
+      "id": "f14a196d-0f8b-47a1-abf9-1b7dea680c98",
+      "name": "Approval Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        520
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "phase8/linkedin-to-crm/v1/approval",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "50fb05c7-60f9-4c9a-a6ec-3d9fef484e24",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phase8-webhook-header",
+          "name": "phase8-webhook-header"
+        }
+      }
+    },
+    {
+      "id": "ef6b3bf5-e3e4-4b84-be00-c5e757327003",
+      "name": "Validate Approval",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        520
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const b=$input.first().json.body??$input.first().json;const must=(x,c)=>{if(!x)throw new Error('permanent:'+c)};must(/^[0-9a-f-]{36}$/.test(b.approval_id||''),'approval_id');must(['approved','rejected'].includes(b.decision),'decision');must(typeof b.reviewer_id==='string'&&b.reviewer_id.length>=1&&b.reviewer_id.length<=100,'reviewer_id');must(/^sha256:[0-9a-f]{64}$/.test(b.payload_hash||''),'payload_hash');return [{json:{...b,reviewer_role:'crm_manager'}}];"
+      }
+    },
+    {
+      "id": "8f01eb1a-e6e0-4e9a-8336-81a93bd42d8f",
+      "name": "Consume Approval",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        480,
+        520
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH decided AS (UPDATE phase8.approvals SET state=CASE WHEN $2='approved' THEN 'consumed' ELSE 'rejected' END,reviewer_id=$3,consumed_at=CASE WHEN $2='approved' THEN now() ELSE NULL END WHERE approval_id=$1 AND state='pending' AND expires_at>now() AND payload_hash=$4 AND reviewer_role=$5 RETURNING approval_id,idempotency_key,capability,payload_hash,payload,reviewer_id,state), event AS (UPDATE phase8.events e SET status=CASE WHEN d.state='consumed' THEN 'approved' ELSE 'rejected' END,updated_at=now() FROM decided d WHERE e.idempotency_key=d.idempotency_key RETURNING e.idempotency_key) SELECT d.*,d.state='consumed' AS approved FROM decided d JOIN event e USING(idempotency_key)",
+        "options": {
+          "queryReplacement": "={{ [$json.approval_id,$json.decision,$json.reviewer_id,$json.payload_hash,$json.reviewer_role] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "phase8-state-postgres",
+          "name": "phase8-state-postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "6a35033c-5b05-4615-a744-a32c74bccc10",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        720,
+        520
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "fcece583-9080-43b6-984b-80a3526ff975",
+              "leftValue": "={{ $json.approved }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "4e7dd1da-dd2f-4373-a141-d8b1e9b44c62",
+      "name": "Build Bounded Operation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        440
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst crypto=require('crypto');const input=$input.first().json; const must=(ok,code)=>{if(!ok)throw new Error('permanent:'+code)}; const closed=(v,keys)=>{must(v&&typeof v==='object'&&!Array.isArray(v),'payload');const extra=Object.keys(v).filter(k=>!keys.includes(k));must(extra.length===0,'unknown_'+extra[0]);};const stable=v=>Array.isArray(v)?'['+v.map(stable).join(',')+']':v&&typeof v==='object'?'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+stable(v[k])).join(',')+'}':JSON.stringify(v);const capabilityKey=(prefix,value)=>prefix+':v1:'+crypto.createHash('sha256').update(stable(value)).digest('hex');const texts=(values,min,max,length,unique,name)=>must(Array.isArray(values)&&values.length>=min&&values.length<=max&&values.every(v=>typeof v==='string'&&v.length>=1&&v.length<=length)&&(!unique||values.length===new Set(values).size),name); const operation=(model,values,more={})=>[{json:{instance:'ocloud-staging',model,values,context:{allowed_company_ids:[1],force_company:1,...more}}}]; \nconst p = input.payload;\nclosed(p, ['title','organization','contact_name','email','phone','description','evidence_ref','idempotency_key']);\nmust(typeof p.title === 'string' && p.title.trim().length >= 3 && p.title.length <= 200, 'title');\nfor (const [k,n] of Object.entries({organization:200,contact_name:200,email:254,phone:50,description:4000})) must(p[k] === null || (typeof p[k] === 'string' && p[k].length >= 1 && p[k].length <= n), k);\nmust(typeof p.evidence_ref === 'string' && p.evidence_ref.length >= 3 && p.evidence_ref.length <= 512, 'evidence_ref');\nmust(p.idempotency_key===capabilityKey('crm-lead',{capability:'create_crm_lead_draft.v1',instance_id:'ocloud-staging',company_id:1,title:p.title,organization:p.organization,contact_name:p.contact_name,email:p.email,phone:p.phone,description:p.description,evidence_ref:p.evidence_ref}),'idempotency_key');\nconst values={name:p.title.trim(),type:'lead',company_id:1};\nfor (const [target,source] of Object.entries({partner_name:'organization',contact_name:'contact_name',email_from:'email',phone:'phone',description:'description'})) if (p[source] !== null) values[target]=p[source];\nreturn operation('crm.lead', values);"
+      }
+    },
+    {
+      "id": "6d8d4cbe-406c-4dc5-be8a-3d434f4244dc",
+      "name": "Prepare Duplicate Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        440
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:{instance:'ocloud-staging',model:'crm.lead',domain:[['company_id','=',1],['type','=','lead'],['name','=',String($('Consume Approval').first().json.payload.title).trim()]],fields:['id','company_id','type'],limit:2,context:{allowed_company_ids:[1],force_company:1}}}];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "69e570ec-12db-41a9-a210-bf2c842129fb",
+      "name": "Check Existing Odoo",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        440
+      ],
+      "parameters": {
+        "serverTransport": "httpStreamable",
+        "endpointUrl": "={{ $env.ODOO_MCP_STAGING_URL }}",
+        "authentication": "bearerAuth",
+        "tool": {
+          "mode": "id",
+          "value": "odoo_search_read"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "convertToBinary": false
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "odoo-mcp-staging-bearer",
+          "name": "odoo-mcp-staging-bearer"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "3b08c56f-2fe6-43f6-8325-5fa129018474",
+      "name": "Check Existing Odoo Attempt 2",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        1680,
+        440
+      ],
+      "parameters": {
+        "serverTransport": "httpStreamable",
+        "endpointUrl": "={{ $env.ODOO_MCP_STAGING_URL }}",
+        "authentication": "bearerAuth",
+        "tool": {
+          "mode": "id",
+          "value": "odoo_search_read"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "convertToBinary": false
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "odoo-mcp-staging-bearer",
+          "name": "odoo-mcp-staging-bearer"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "db3f2363-571b-4af1-b7fd-881bfc6faf75",
+      "name": "Check Existing Odoo Attempt 3",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        1920,
+        440
+      ],
+      "parameters": {
+        "serverTransport": "httpStreamable",
+        "endpointUrl": "={{ $env.ODOO_MCP_STAGING_URL }}",
+        "authentication": "bearerAuth",
+        "tool": {
+          "mode": "id",
+          "value": "odoo_search_read"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "convertToBinary": false
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "odoo-mcp-staging-bearer",
+          "name": "odoo-mcp-staging-bearer"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "f63b2164-69f3-43d6-85b5-cff455e4cc62",
+      "name": "Check Existing Odoo Attempt 4",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        2160,
+        440
+      ],
+      "parameters": {
+        "serverTransport": "httpStreamable",
+        "endpointUrl": "={{ $env.ODOO_MCP_STAGING_URL }}",
+        "authentication": "bearerAuth",
+        "tool": {
+          "mode": "id",
+          "value": "odoo_search_read"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "convertToBinary": false
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "odoo-mcp-staging-bearer",
+          "name": "odoo-mcp-staging-bearer"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "859a4c98-e745-413f-b22f-4b81a7c3271e",
+      "name": "Check Existing Odoo Classify Error 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        560
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "d9c83757-5814-4b28-b43a-21f0c2bd9649",
+      "name": "Check Existing Odoo Retryable 1?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1530,
+        600
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "d9c83757-5814-4b28-b43a-21f0c2bd9649",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "22154082-4de4-48a6-b5cf-454a7fa6bde1",
+      "name": "Check Existing Odoo Backoff 2s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1560,
+        600
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "abe873df-884a-4855-9f65-779c21b785c4",
+      "name": "Check Existing Odoo Classify Error 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1740,
+        560
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "e471a8d0-8489-4339-83eb-9dba90b2c8c8",
+      "name": "Check Existing Odoo Retryable 2?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1770,
+        600
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "e471a8d0-8489-4339-83eb-9dba90b2c8c8",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3b8e869e-be8a-49bb-b7b9-92c73c365e25",
+      "name": "Check Existing Odoo Backoff 10s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1800,
+        600
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 10,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "75c354cd-b0d6-49e0-ab98-c1aea5405ef1",
+      "name": "Check Existing Odoo Classify Error 3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        560
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "d0fd0944-c9ec-45e2-978f-8f7cdd87b83d",
+      "name": "Check Existing Odoo Retryable 3?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2010,
+        600
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "d0fd0944-c9ec-45e2-978f-8f7cdd87b83d",
+              "leftValue": "={{ $json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "687fa194-faf8-4fc2-8f76-7b95aafc1e74",
+      "name": "Check Existing Odoo Backoff 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2040,
+        600
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 30,
+        "unit": "seconds",
+        "options": {}
+      }
+    },
+    {
+      "id": "b30ad9f2-4dc3-4be4-9a5d-c9e5228ab100",
+      "name": "Check Existing Odoo Classify Error 4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        560
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const value=$input.first().json;const error=value.error??value;const message=String(error.message??error.description??'');const match=message.match(/\\b(?:HTTP|status(?: code)?)\\D*(\\d{3})\\b/i);const status=Number(error.httpCode??error.statusCode??error.status??value.httpCode??value.statusCode??match?.[1]);const permanent=Number.isFinite(status)?status>=400&&status<500&&![408,425,429].includes(status):/(denied|forbidden|unauthori[sz]ed|access|schema|company)/i.test(message);return [{json:{...value,retryable:!permanent}}];"
+      }
+    },
+    {
+      "id": "1acc0a2a-091b-42b6-8138-f904107caabc",
+      "name": "Decode Duplicate Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        440
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const decode=raw=>{let value=raw.structuredContent??raw.content?.find(x=>x.type==='text')?.text??raw;for(let i=0;i<4;i++){if(typeof value==='string'){value=JSON.parse(value);continue;}if(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===1&&Object.hasOwn(value,'result')){value=value.result;continue;}break;}if(!value||typeof value!=='object'||Array.isArray(value)||value.error)throw new Error('invalid_mcp_result');return value};return $input.all().map((item,index)=>({json:decode(item.json),pairedItem:{item:index}}));"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "6adf45c0-40a9-4345-93f5-ad23df125c13",
+      "name": "Classify Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        440
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const records=$input.first().json.records??[];if(!Array.isArray(records))throw new Error('invalid_duplicate_result');if(records.length>1)throw new Error('multiple_duplicate_candidates');return [{json:{exists:records.length===1,record:records[0]??null}}];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "b89f8563-8a5c-4fad-a304-75b700520cff",
+      "name": "No Existing?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1920,
+        440
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c7040680-a6a8-4c11-a733-8ed5c3f0bf6c",
+              "leftValue": "={{ $json.exists }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "82d41acb-51a1-4aad-bf31-1887fe970ad6",
+      "name": "Create Odoo Record",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        2160,
+        360
+      ],
+      "parameters": {
+        "serverTransport": "httpStreamable",
+        "endpointUrl": "={{ $env.ODOO_MCP_STAGING_URL }}",
+        "authentication": "bearerAuth",
+        "tool": {
+          "mode": "id",
+          "value": "odoo_create"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify($(\"Build Bounded Operation\").first().json) }}",
+        "options": {
+          "timeout": 30000,
+          "convertToBinary": false
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "odoo-mcp-staging-bearer",
+          "name": "odoo-mcp-staging-bearer"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "b1b74266-c16e-4684-b094-cf35a0cd0511",
+      "name": "Decode Created Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        360
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const decode=raw=>{let value=raw.structuredContent??raw.content?.find(x=>x.type==='text')?.text??raw;for(let i=0;i<4;i++){if(typeof value==='string'){value=JSON.parse(value);continue;}if(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===1&&Object.hasOwn(value,'result')){value=value.result;continue;}break;}if(!value||typeof value!=='object'||Array.isArray(value)||value.error)throw new Error('invalid_mcp_result');return value};return $input.all().map((item,index)=>({json:decode(item.json),pairedItem:{item:index}}));"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "6b5a548c-90f5-4ecc-8556-aa6b69030583",
+      "name": "Prepare Verification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        360
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:{instance:'ocloud-staging',model:'crm.lead',ids:[$json.id],fields:['id','company_id','type'],context:{allowed_company_ids:[1],force_company:1}}}];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "ff9c77c6-f419-4caf-8480-6cd8a4ed0dba",
+      "name": "Verify Odoo Record",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        2880,
+        360
+      ],
+      "parameters": {
+        "serverTransport": "httpStreamable",
+        "endpointUrl": "={{ $env.ODOO_MCP_STAGING_URL }}",
+        "authentication": "bearerAuth",
+        "tool": {
+          "mode": "id",
+          "value": "odoo_read"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "convertToBinary": false
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "odoo-mcp-staging-bearer",
+          "name": "odoo-mcp-staging-bearer"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "bf91916c-bb94-48ea-b795-38c979010f04",
+      "name": "Decode Verification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        360
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const decode=raw=>{let value=raw.structuredContent??raw.content?.find(x=>x.type==='text')?.text??raw;for(let i=0;i<4;i++){if(typeof value==='string'){value=JSON.parse(value);continue;}if(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===1&&Object.hasOwn(value,'result')){value=value.result;continue;}break;}if(!value||typeof value!=='object'||Array.isArray(value)||value.error)throw new Error('invalid_mcp_result');return value};return $input.all().map((item,index)=>({json:decode(item.json),pairedItem:{item:index}}));"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "5f7b1852-31c1-4d05-bfb9-b7c689432a0d",
+      "name": "Verify Postcondition",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        360
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const must=(ok,code)=>{if(!ok)throw new Error(code)};const id=v=>Array.isArray(v)?v[0]:v;const created=$('Decode Created Record').first().json;const result=$input.first().json;const records=result.records??result;const record=Array.isArray(records)?records[0]:records;if(!record||record.id!==created.id)throw new Error('record_verification_missing');must(id(record.company_id)===1&&record.type==='lead','crm_lead_postcondition');return [{json:{id:created.id,record}}];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c6275cac-fac8-4d55-90d9-0da8448aab0f",
+      "name": "Complete",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3360,
+        360
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE phase8.events SET status='completed',odoo_model=$2,odoo_record_id=$3,updated_at=now() WHERE idempotency_key=$1 RETURNING idempotency_key,status,odoo_model,odoo_record_id",
+        "options": {
+          "queryReplacement": "={{ [$(\"Consume Approval\").first().json.idempotency_key, $(\"Build Bounded Operation\").first().json.model, $(\"Decode Created Record\").first().json.id] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "phase8-state-postgres",
+          "name": "phase8-state-postgres"
+        }
+      }
+    },
+    {
+      "id": "5fd77a64-9224-4b3f-bdaf-d262f6c17cdb",
+      "name": "Complete Duplicate",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2160,
+        560
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE phase8.events SET status='duplicate',odoo_model=$2,odoo_record_id=$3,updated_at=now() WHERE idempotency_key=$1 RETURNING idempotency_key,status,odoo_model,odoo_record_id",
+        "options": {
+          "queryReplacement": "={{ [$(\"Consume Approval\").first().json.idempotency_key, $(\"Build Bounded Operation\").first().json.model, $(\"Classify Duplicate\").first().json.record.id] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "phase8-state-postgres",
+          "name": "phase8-state-postgres"
+        }
+      }
+    },
+    {
+      "id": "d37c2030-dd15-49d7-b15c-a4269fc2d497",
+      "name": "Queue Approval Exception",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1920,
+        760
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH ins AS (INSERT INTO phase8.exceptions(exception_id,idempotency_key,error_class,reason_code,owner) SELECT md5($1 || ':approval_prewrite_failed')::uuid,$1,'permanent','approval_prewrite_failed',owner FROM phase8.events WHERE idempotency_key=$1 ON CONFLICT (exception_id) DO NOTHING RETURNING exception_id) UPDATE phase8.events SET status='exception',updated_at=now() WHERE idempotency_key=$1 RETURNING COALESCE((SELECT exception_id FROM ins),md5($1 || ':approval_prewrite_failed')::uuid) exception_id,status",
+        "options": {
+          "queryReplacement": "={{ [$(\"Consume Approval\").first().json.idempotency_key] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "phase8-state-postgres",
+          "name": "phase8-state-postgres"
+        }
+      }
+    },
+    {
+      "id": "74ef5f59-e92e-4289-b403-1e9f4dc03263",
+      "name": "Approval Exception Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2160,
+        760
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {status:\"exception\",exception_id:$json.exception_id} }}",
+        "options": {
+          "responseCode": 409
+        }
+      }
+    },
+    {
+      "id": "58ef50b7-fb2f-46dc-8005-1a2ed7226d36",
+      "name": "Queue Uncertain",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2640,
+        680
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH ins AS (INSERT INTO phase8.exceptions(exception_id,idempotency_key,error_class,reason_code,owner) SELECT md5($1 || ':odoo_write_or_verify_uncertain')::uuid,$1,'uncertain','odoo_write_or_verify_uncertain',owner FROM phase8.events WHERE idempotency_key=$1 ON CONFLICT (exception_id) DO NOTHING RETURNING exception_id) UPDATE phase8.events SET status='uncertain',updated_at=now() WHERE idempotency_key=$1 RETURNING COALESCE((SELECT exception_id FROM ins),md5($1 || ':odoo_write_or_verify_uncertain')::uuid) exception_id,status",
+        "options": {
+          "queryReplacement": "={{ [$(\"Consume Approval\").first().json.idempotency_key] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "phase8-state-postgres",
+          "name": "phase8-state-postgres"
+        }
+      }
+    },
+    {
+      "id": "aeb6d5dc-082d-4693-955e-8ac76c05c4ce",
+      "name": "Uncertain Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2880,
+        680
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {status:\"uncertain\",exception_id:$json.exception_id} }}",
+        "options": {
+          "responseCode": 409
+        }
+      }
+    },
+    {
+      "id": "ab9cc16a-2ef2-4ac1-a9dd-97f904be7047",
+      "name": "Approval Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1920,
+        440
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "d386f733-d3ba-49fb-b634-5060dabcd01c",
+      "name": "Rejected Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        960,
+        600
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {status:\"rejected_or_invalid\"} }}",
+        "options": {
+          "responseCode": 409
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Extract Source": {
+      "main": [
+        [
+          {
+            "node": "Validate Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Source Classify Error 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Source Classify Error 1": {
+      "main": [
+        [
+          {
+            "node": "Extract Source Retryable 1?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Source Retryable 1?": {
+      "main": [
+        [
+          {
+            "node": "Extract Source Backoff 2s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Source Backoff 2s": {
+      "main": [
+        [
+          {
+            "node": "Extract Source Attempt 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Source Attempt 2": {
+      "main": [
+        [
+          {
+            "node": "Validate Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Source Classify Error 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Source Classify Error 2": {
+      "main": [
+        [
+          {
+            "node": "Extract Source Retryable 2?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Source Retryable 2?": {
+      "main": [
+        [
+          {
+            "node": "Extract Source Backoff 10s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Source Backoff 10s": {
+      "main": [
+        [
+          {
+            "node": "Extract Source Attempt 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Source Attempt 3": {
+      "main": [
+        [
+          {
+            "node": "Validate Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Source Classify Error 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Source Classify Error 3": {
+      "main": [
+        [
+          {
+            "node": "Extract Source Retryable 3?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Source Retryable 3?": {
+      "main": [
+        [
+          {
+            "node": "Extract Source Backoff 30s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Source Backoff 30s": {
+      "main": [
+        [
+          {
+            "node": "Extract Source Attempt 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Source Attempt 4": {
+      "main": [
+        [
+          {
+            "node": "Validate Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Source Classify Error 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Source Classify Error 4": {
+      "main": [
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo": {
+      "main": [
+        [
+          {
+            "node": "Decode Odoo Read",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Odoo Classify Error 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Classify Error 1": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Retryable 1?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Retryable 1?": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Backoff 2s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Backoff 2s": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Attempt 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Attempt 2": {
+      "main": [
+        [
+          {
+            "node": "Decode Odoo Read",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Odoo Classify Error 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Classify Error 2": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Retryable 2?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Retryable 2?": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Backoff 10s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Backoff 10s": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Attempt 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Attempt 3": {
+      "main": [
+        [
+          {
+            "node": "Decode Odoo Read",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Odoo Classify Error 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Classify Error 3": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Retryable 3?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Retryable 3?": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Backoff 30s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Backoff 30s": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo Attempt 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Attempt 4": {
+      "main": [
+        [
+          {
+            "node": "Decode Odoo Read",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Odoo Classify Error 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Odoo Classify Error 4": {
+      "main": [
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match and Prepare Review": {
+      "main": [
+        [
+          {
+            "node": "Build Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Match and Prepare Review Classify Error 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match and Prepare Review Classify Error 1": {
+      "main": [
+        [
+          {
+            "node": "Match and Prepare Review Retryable 1?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match and Prepare Review Retryable 1?": {
+      "main": [
+        [
+          {
+            "node": "Match and Prepare Review Backoff 2s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match and Prepare Review Backoff 2s": {
+      "main": [
+        [
+          {
+            "node": "Match and Prepare Review Attempt 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match and Prepare Review Attempt 2": {
+      "main": [
+        [
+          {
+            "node": "Build Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Match and Prepare Review Classify Error 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match and Prepare Review Classify Error 2": {
+      "main": [
+        [
+          {
+            "node": "Match and Prepare Review Retryable 2?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match and Prepare Review Retryable 2?": {
+      "main": [
+        [
+          {
+            "node": "Match and Prepare Review Backoff 10s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match and Prepare Review Backoff 10s": {
+      "main": [
+        [
+          {
+            "node": "Match and Prepare Review Attempt 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match and Prepare Review Attempt 3": {
+      "main": [
+        [
+          {
+            "node": "Build Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Match and Prepare Review Classify Error 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match and Prepare Review Classify Error 3": {
+      "main": [
+        [
+          {
+            "node": "Match and Prepare Review Retryable 3?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match and Prepare Review Retryable 3?": {
+      "main": [
+        [
+          {
+            "node": "Match and Prepare Review Backoff 30s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match and Prepare Review Backoff 30s": {
+      "main": [
+        [
+          {
+            "node": "Match and Prepare Review Attempt 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match and Prepare Review Attempt 4": {
+      "main": [
+        [
+          {
+            "node": "Build Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Match and Prepare Review Classify Error 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match and Prepare Review Classify Error 4": {
+      "main": [
+        [
+          {
+            "node": "Queue Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner": {
+      "main": [
+        [
+          {
+            "node": "Alert End",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Owner Classify Error 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Classify Error 1": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Retryable 1?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Retryable 1?": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Backoff 2s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Backoff 2s": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Attempt 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Attempt 2": {
+      "main": [
+        [
+          {
+            "node": "Alert End",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Owner Classify Error 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Classify Error 2": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Retryable 2?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Retryable 2?": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Backoff 10s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Backoff 10s": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Attempt 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Attempt 3": {
+      "main": [
+        [
+          {
+            "node": "Alert End",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Owner Classify Error 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Classify Error 3": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Retryable 3?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Retryable 3?": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Backoff 30s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Backoff 30s": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner Attempt 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Attempt 4": {
+      "main": [
+        [
+          {
+            "node": "Alert End",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Owner Classify Error 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner Classify Error 4": {
+      "main": [
+        [
+          {
+            "node": "Alert End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Event": {
+      "main": [
+        [
+          {
+            "node": "Claim Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Event": {
+      "main": [
+        [
+          {
+            "node": "Is New",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is New": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Extract Source",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Permanent Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Extraction": {
+      "main": [
+        [
+          {
+            "node": "Prepare Odoo Reads",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Permanent Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Odoo Reads": {
+      "main": [
+        [
+          {
+            "node": "Read Odoo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Permanent Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decode Odoo Read": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Odoo Reads",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Permanent Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Odoo Reads": {
+      "main": [
+        [
+          {
+            "node": "Match and Prepare Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Permanent Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Review": {
+      "main": [
+        [
+          {
+            "node": "Queue Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Permanent Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Exception": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Exception Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Permanent Exception": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Permanent Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Review": {
+      "main": [
+        [
+          {
+            "node": "Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Odoo": {
+      "main": [
+        [
+          {
+            "node": "Decode Duplicate Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Existing Odoo Classify Error 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Odoo Classify Error 1": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Odoo Retryable 1?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Odoo Retryable 1?": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Odoo Backoff 2s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Approval Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Odoo Backoff 2s": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Odoo Attempt 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Odoo Attempt 2": {
+      "main": [
+        [
+          {
+            "node": "Decode Duplicate Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Existing Odoo Classify Error 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Odoo Classify Error 2": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Odoo Retryable 2?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Odoo Retryable 2?": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Odoo Backoff 10s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Approval Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Odoo Backoff 10s": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Odoo Attempt 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Odoo Attempt 3": {
+      "main": [
+        [
+          {
+            "node": "Decode Duplicate Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Existing Odoo Classify Error 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Odoo Classify Error 3": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Odoo Retryable 3?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Odoo Retryable 3?": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Odoo Backoff 30s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Approval Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Odoo Backoff 30s": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Odoo Attempt 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Odoo Attempt 4": {
+      "main": [
+        [
+          {
+            "node": "Decode Duplicate Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Existing Odoo Classify Error 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Odoo Classify Error 4": {
+      "main": [
+        [
+          {
+            "node": "Queue Approval Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Bounded Operation": {
+      "main": [
+        [
+          {
+            "node": "Prepare Duplicate Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Duplicate Check": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Odoo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Approval Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decode Duplicate Check": {
+      "main": [
+        [
+          {
+            "node": "Classify Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Approval Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Duplicate": {
+      "main": [
+        [
+          {
+            "node": "No Existing?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Approval Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Existing?": {
+      "main": [
+        [
+          {
+            "node": "Create Odoo Record",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Complete Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Odoo Record": {
+      "main": [
+        [
+          {
+            "node": "Decode Created Record",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Uncertain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decode Created Record": {
+      "main": [
+        [
+          {
+            "node": "Prepare Verification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Uncertain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Verification": {
+      "main": [
+        [
+          {
+            "node": "Verify Odoo Record",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Uncertain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Odoo Record": {
+      "main": [
+        [
+          {
+            "node": "Decode Verification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Uncertain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decode Verification": {
+      "main": [
+        [
+          {
+            "node": "Verify Postcondition",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Uncertain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Postcondition": {
+      "main": [
+        [
+          {
+            "node": "Complete",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Uncertain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Approval Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Approval Exception": {
+      "main": [
+        [
+          {
+            "node": "Approval Exception Response",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Alert Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Uncertain": {
+      "main": [
+        [
+          {
+            "node": "Uncertain Response",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Alert Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approval Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Approval": {
+      "main": [
+        [
+          {
+            "node": "Consume Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consume Approval": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Build Bounded Operation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rejected Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete": {
+      "main": [
+        [
+          {
+            "node": "Approval Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Jakarta",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "executionTimeout": 300
+  },
+  "versionId": "405ee7c2-dbb4-453d-9a35-4e93f3f2640f",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "phase": 8,
+    "schemaVersion": "1.0",
+    "productionApproved": false
+  },
+  "tags": []
+}

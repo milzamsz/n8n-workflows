@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ocloud.example/schemas/phase8/scheduled-business-briefs.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["envelope", "schedule", "definition", "delivery", "result", "review"],
+  "properties": {
+    "envelope": { "$ref": "envelope.v1.schema.json" },
+    "schedule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schedule_id", "timezone", "period_start", "period_end", "cutoff_at"],
+      "properties": {
+        "schedule_id": { "type": "string", "minLength": 3, "maxLength": 100 },
+        "timezone": { "const": "Asia/Jakarta" },
+        "period_start": { "type": "string", "format": "date-time" },
+        "period_end": { "type": "string", "format": "date-time" },
+        "cutoff_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "definition": {
+      "type": "object", "additionalProperties": false,
+      "required": ["brief_type", "business_definition_ids", "definition_version"],
+      "properties": {
+        "brief_type": { "enum": ["management", "receivables", "payables", "pipeline", "stock_exceptions", "purchase_receipt_exceptions"] },
+        "business_definition_ids": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "type": "string", "pattern": "^[a-z0-9_-]+\\.v[0-9]+$" } },
+        "definition_version": { "type": "string", "pattern": "^v[0-9]+$" }
+      }
+    },
+    "delivery": {
+      "type": "object", "additionalProperties": false,
+      "required": ["destination_ref", "allowlist_ref", "channel"],
+      "properties": {
+        "destination_ref": { "type": "string", "minLength": 3, "maxLength": 512 },
+        "allowlist_ref": { "const": "config://n8n/brief-destination-allowlist" },
+        "channel": { "enum": ["email", "webhook"] }
+      }
+    },
+    "result": {
+      "type": "object", "additionalProperties": false,
+      "required": ["data_fresh_at", "partial_failure", "failures", "currency", "included_states"],
+      "properties": {
+        "data_fresh_at": { "type": "string", "format": "date-time" },
+        "partial_failure": { "type": "boolean" },
+        "failures": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 500 } },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "included_states": { "type": "array", "minItems": 1, "maxItems": 30, "items": { "type": "string", "maxLength": 100 } }
+      }
+    },
+    "review": {
+      "type": "object", "additionalProperties": false, "required": ["state", "owner", "schedule_approval_ref"],
+      "properties": {
+        "state": { "enum": ["schedule_approved", "review_required", "delivery_failed"] },
+        "owner": { "const": "Business Intelligence Operations" },
+        "schedule_approval_ref": { "type": "string", "minLength": 3, "maxLength": 512 }
+      }
+    }
+  }
+}

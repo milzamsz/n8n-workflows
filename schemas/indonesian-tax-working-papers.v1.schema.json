@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ocloud.example/schemas/phase8/indonesian-tax-working-papers.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["envelope", "request", "calculation", "reconciliation", "review"],
+  "properties": {
+    "envelope": { "$ref": "envelope.v1.schema.json" },
+    "request": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tax_period", "rule_version", "rule_source_ref", "transaction_refs", "document_refs"],
+      "properties": {
+        "tax_period": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" },
+        "rule_version": { "type": "string", "minLength": 3, "maxLength": 100 },
+        "rule_source_ref": { "type": "string", "minLength": 3, "maxLength": 512 },
+        "transaction_refs": { "type": "array", "minItems": 1, "maxItems": 10000, "items": { "type": "string", "maxLength": 512 } },
+        "document_refs": { "type": "array", "maxItems": 10000, "items": { "type": "string", "maxLength": 512 } }
+      }
+    },
+    "calculation": {
+      "type": "array", "minItems": 1, "maxItems": 10000,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["transaction_ref", "tax_object", "dpp_minor", "rate_basis_points", "tax_minor", "responsibility", "evidence_refs", "assumptions"],
+        "properties": {
+          "transaction_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "tax_object": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "dpp_minor": { "type": "integer" },
+          "rate_basis_points": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "tax_minor": { "type": "integer" },
+          "responsibility": { "enum": ["withhold", "collect", "self_assess", "not_applicable", "unresolved"] },
+          "evidence_refs": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "type": "string", "maxLength": 512 } },
+          "assumptions": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 500 } }
+        }
+      }
+    },
+    "reconciliation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["odoo_total_minor", "working_paper_total_minor", "difference_minor", "missing_documents", "exceptions"],
+      "properties": {
+        "odoo_total_minor": { "type": "integer" },
+        "working_paper_total_minor": { "type": "integer" },
+        "difference_minor": { "type": "integer" },
+        "missing_documents": { "type": "array", "maxItems": 10000, "items": { "type": "string", "maxLength": 512 } },
+        "exceptions": { "type": "array", "maxItems": 10000, "items": { "type": "string", "maxLength": 500 } }
+      }
+    },
+    "review": {
+      "type": "object", "additionalProperties": false, "required": ["state", "owner", "reviewer_id", "signoff_at", "statutory_submission_allowed"],
+      "properties": {
+        "state": { "enum": ["pending", "signed_off", "rejected", "correction_required"] },
+        "owner": { "const": "Tax Operations" },
+        "reviewer_id": { "type": ["string", "null"], "maxLength": 100 },
+        "signoff_at": { "type": ["string", "null"], "format": "date-time" },
+        "statutory_submission_allowed": { "const": false }
+      }
+    }
+  }
+}

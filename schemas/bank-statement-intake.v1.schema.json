@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ocloud.example/schemas/phase8/bank-statement-intake.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["envelope", "source", "statement", "lines", "review"],
+  "properties": {
+    "envelope": { "$ref": "envelope.v1.schema.json" },
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_id", "account_map_ref", "filename", "mime_type", "size_bytes"],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 3, "maxLength": 100 },
+        "account_map_ref": { "const": "secret://n8n/bank/account-map" },
+        "filename": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "mime_type": { "enum": ["text/csv", "application/vnd.ms-excel", "application/pdf"] },
+        "size_bytes": { "type": "integer", "minimum": 1, "maximum": 50000000 }
+      }
+    },
+    "statement": {
+      "type": "object", "additionalProperties": false,
+      "required": ["journal_id", "account_last4", "period_start", "period_end", "currency"],
+      "properties": {
+        "journal_id": { "const": 6 },
+        "account_last4": { "type": "string", "pattern": "^[0-9A-Za-z]{4}$" },
+        "period_start": { "type": "string", "format": "date" },
+        "period_end": { "type": "string", "format": "date" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+      }
+    },
+    "lines": {
+      "type": "array", "minItems": 1, "maxItems": 10000,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["external_transaction_id", "date", "amount_minor", "normalized_description", "candidates", "classification", "confidence", "evidence_refs"],
+        "properties": {
+          "external_transaction_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "date": { "type": "string", "format": "date" },
+          "amount_minor": { "type": "integer", "not": { "const": 0 } },
+          "normalized_description": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "candidates": {
+            "type": "array", "maxItems": 20,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["partner_id", "document_model", "document_id", "confidence", "explanation"],
+              "properties": {
+                "partner_id": { "type": ["integer", "null"], "minimum": 1 },
+                "document_model": { "enum": ["account.move", "account.payment", null] },
+                "document_id": { "type": ["integer", "null"], "minimum": 1 },
+                "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+                "explanation": { "type": "string", "minLength": 3, "maxLength": 1000 }
+              }
+            }
+          },
+          "classification": { "enum": ["one_to_one", "one_to_many", "partial", "unmatched"] },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "evidence_refs": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "type": "string", "maxLength": 512 } }
+        }
+      }
+    },
+    "review": {
+      "type": "object", "additionalProperties": false, "required": ["state", "owner", "reconciliation_confirmation_allowed"],
+      "properties": {
+        "state": { "enum": ["pending", "approved_for_staging_import", "rejected", "expired"] },
+        "owner": { "const": "Treasury Operations" },
+        "reconciliation_confirmation_allowed": { "const": false }
+      }
+    }
+  }
+}
