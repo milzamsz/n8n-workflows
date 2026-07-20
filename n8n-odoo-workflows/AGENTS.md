@@ -1,5 +1,8 @@
 # Repository Guide: n8n-odoo-workflows
 
+This is the `n8n-odoo-workflows/` project folder inside the shared
+`milzamsz/n8n-workflows` repository, not an independent repository.
+
 ## Mission
 
 Own durable external ingestion, schedules, retries, idempotency, exceptions,

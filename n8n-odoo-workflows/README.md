@@ -1,5 +1,10 @@
 # n8n Odoo Workflows
 
+This project is maintained in the shared
+[`milzamsz/n8n-workflows`](https://github.com/milzamsz/n8n-workflows)
+repository under
+[`n8n-odoo-workflows/`](https://github.com/milzamsz/n8n-workflows/tree/main/n8n-odoo-workflows).
+
 Phase 8 workflow exports for the Odoo agent platform. All exports are pinned to
 n8n `2.30.7`, inactive, and scoped to `ocloud-staging` / company `1` until the
 production gate in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) is fully evidenced.
